@@ -24,6 +24,7 @@ import (
 	crtclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 
 	"github.com/argoproj/argo-cd/v2/applicationset/generators"
 	"github.com/argoproj/argo-cd/v2/applicationset/utils"
@@ -4835,6 +4836,120 @@ func TestUpdateApplicationSetApplicationStatusProgress(t *testing.T) {
 
 			assert.Equal(t, err, nil, "expected no errors, but errors occured")
 			assert.Equal(t, cc.expectedAppStatus, appStatuses, "expected appStatuses did not match actual")
+		})
+	}
+}
+
+func TestOwnsHandler(t *testing.T) {
+	assert.False(t, ownsHandler.CreateFunc(event.CreateEvent{}))
+	assert.True(t, ownsHandler.DeleteFunc(event.DeleteEvent{}))
+	assert.True(t, ownsHandler.GenericFunc(event.GenericEvent{}))
+
+	now := metav1.Now()
+	type args struct {
+		e event.UpdateEvent
+	}
+	tests := []struct {
+		name string
+		args args
+		want bool
+	}{
+		{name: "SameApplicationReconciledAtDiff", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{ReconciledAt: &now}},
+			ObjectNew: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{ReconciledAt: &now}},
+		}}, want: false},
+		{name: "SameApplicationResourceVersionDiff", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{
+				ResourceVersion: "foo",
+			}},
+			ObjectNew: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{
+				ResourceVersion: "bar",
+			}},
+		}}, want: false},
+		{name: "ApplicationHealthStatusDiff", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				Health: argov1alpha1.HealthStatus{
+					Status: "Unknown",
+				},
+			}},
+			ObjectNew: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				Health: argov1alpha1.HealthStatus{
+					Status: "Healthy",
+				},
+			}},
+		}}, want: true},
+		{name: "ApplicationSyncStatusDiff", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				Sync: argov1alpha1.SyncStatus{
+					Status: "OutOfSync",
+				},
+			}},
+			ObjectNew: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				Sync: argov1alpha1.SyncStatus{
+					Status: "Synced",
+				},
+			}},
+		}}, want: true},
+		{name: "ApplicationOperationStateDiff", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				OperationState: &argov1alpha1.OperationState{
+					Phase: "foo",
+				},
+			}},
+			ObjectNew: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				OperationState: &argov1alpha1.OperationState{
+					Phase: "bar",
+				},
+			}},
+		}}, want: true},
+		{name: "ApplicationOperationStartedAtDiff", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				OperationState: &argov1alpha1.OperationState{
+					StartedAt: now,
+				},
+			}},
+			ObjectNew: &argov1alpha1.Application{Status: argov1alpha1.ApplicationStatus{
+				OperationState: &argov1alpha1.OperationState{
+					StartedAt: metav1.NewTime(now.Add(time.Minute * 1)),
+				},
+			}},
+		}}, want: true},
+		{name: "SameApplicationGeneration", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{
+				Generation: 1,
+			}},
+			ObjectNew: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{
+				Generation: 2,
+			}},
+		}}, want: false},
+		{name: "DifferentApplicationSpec", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{Spec: argov1alpha1.ApplicationSpec{Project: "default"}},
+			ObjectNew: &argov1alpha1.Application{Spec: argov1alpha1.ApplicationSpec{Project: "not-default"}},
+		}}, want: true},
+		{name: "DifferentApplicationLabels", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"foo": "bar"}}},
+			ObjectNew: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"bar": "foo"}}},
+		}}, want: true},
+		{name: "DifferentApplicationAnnotations", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"foo": "bar"}}},
+			ObjectNew: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"bar": "foo"}}},
+		}}, want: true},
+		{name: "DifferentApplicationFinalizers", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{"argo"}}},
+			ObjectNew: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Finalizers: []string{"none"}}},
+		}}, want: true},
+		{name: "NotAnAppOld", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.AppProject{},
+			ObjectNew: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"bar": "foo"}}},
+		}}, want: false},
+		{name: "NotAnAppNew", args: args{e: event.UpdateEvent{
+			ObjectOld: &argov1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"foo": "bar"}}},
+			ObjectNew: &argov1alpha1.AppProject{},
+		}}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equalf(t, tt.want, ownsHandler.UpdateFunc(tt.args.e), "UpdateFunc(%v)", tt.args.e)
 		})
 	}
 }

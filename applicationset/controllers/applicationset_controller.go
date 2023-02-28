@@ -29,9 +29,12 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	"github.com/argoproj/argo-cd/v2/applicationset/generators"
@@ -533,7 +536,7 @@ func (r *ApplicationSetReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&argov1alpha1.ApplicationSet{}).
-		Owns(&argov1alpha1.Application{}).
+		Owns(&argov1alpha1.Application{}, builder.WithPredicates(ownsHandler)).
 		Watches(
 			&source.Kind{Type: &corev1.Secret{}},
 			&clusterSecretEventHandler{
@@ -1310,6 +1313,29 @@ func syncApplication(application argov1alpha1.Application, prune bool) (argov1al
 	application.Operation = &operation
 
 	return application, nil
+}
+
+var ownsHandler = predicate.Funcs{
+	CreateFunc: func(e event.CreateEvent) bool {
+		// if we are the owner and there is a create event, we most likely created it and do not need to
+		// re-reconcile
+		log.Debugln("received create event from owning an application")
+		return false
+	},
+	DeleteFunc: func(e event.DeleteEvent) bool {
+		log.Debugln("received delete event from owning an application")
+		return true
+	},
+	UpdateFunc: func(e event.UpdateEvent) bool {
+		// Do not reconcile appset when an app is updated. It is potentially dangerous as
+		// it can clog the git server when there are app syncloops.
+		log.Debugln("received update event from owning an application")
+		return false
+	},
+	GenericFunc: func(e event.GenericEvent) bool {
+		log.Debugln("received generic event from owning an application")
+		return true
+	},
 }
 
 var _ handler.EventHandler = &clusterSecretEventHandler{}
