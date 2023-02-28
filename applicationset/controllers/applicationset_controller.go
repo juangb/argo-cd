@@ -17,7 +17,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -1328,57 +1327,15 @@ var ownsHandler = predicate.Funcs{
 		return true
 	},
 	UpdateFunc: func(e event.UpdateEvent) bool {
+		// Do not reconcile appset when an app is updated. It is potentially dangerous as
+		// it can clog the git server when there are app syncloops.
 		log.Debugln("received update event from owning an application")
-		appOld, isApp := e.ObjectOld.(*argov1alpha1.Application)
-		if !isApp {
-			return false
-		}
-		appNew, isApp := e.ObjectNew.(*argov1alpha1.Application)
-		if !isApp {
-			return false
-		}
-		requeue := shouldRequeueApplicationSet(appOld, appNew)
-		log.Debugf("requeue: %t caused by application %s\n", requeue, appNew.Name)
-		return requeue
+		return false
 	},
 	GenericFunc: func(e event.GenericEvent) bool {
 		log.Debugln("received generic event from owning an application")
 		return true
 	},
-}
-
-// shouldRequeueApplicationSet determines when we want to requeue an ApplicationSet for reconciling based on an owned
-// application change
-// The applicationset controller owns a subset of the Application CR.
-// We do not need to re-reconcile if parts of the application change outside the applicationset's control.
-// An example being, Application.ApplicationStatus.ReconciledAt which gets updated by the application controller.
-// Additionally, Application.ObjectMeta.ResourceVersion and Application.ObjectMeta.Generation which are set by K8s.
-func shouldRequeueApplicationSet(appOld *argov1alpha1.Application, appNew *argov1alpha1.Application) bool {
-	if appOld == nil || appNew == nil {
-		return false
-	}
-
-	// the applicationset controller owns the application spec, labels, annotations, and finalizers on the applications
-	if !reflect.DeepEqual(appOld.Spec, appNew.Spec) ||
-		!reflect.DeepEqual(appOld.ObjectMeta.GetAnnotations(), appNew.ObjectMeta.GetAnnotations()) ||
-		!reflect.DeepEqual(appOld.ObjectMeta.GetLabels(), appNew.ObjectMeta.GetLabels()) ||
-		!reflect.DeepEqual(appOld.ObjectMeta.GetFinalizers(), appNew.ObjectMeta.GetFinalizers()) {
-		return true
-	}
-
-	// progressive syncs use the application status for updates. if they differ, requeue to trigger the next progression
-	if appOld.Status.Health.Status != appNew.Status.Health.Status || appOld.Status.Sync.Status != appNew.Status.Sync.Status {
-		return true
-	}
-
-	if appOld.Status.OperationState != nil && appNew.Status.OperationState != nil {
-		if appOld.Status.OperationState.Phase != appNew.Status.OperationState.Phase ||
-			appOld.Status.OperationState.StartedAt != appNew.Status.OperationState.StartedAt {
-			return true
-		}
-	}
-
-	return false
 }
 
 var _ handler.EventHandler = &clusterSecretEventHandler{}
