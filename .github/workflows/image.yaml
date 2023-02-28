@@ -44,13 +44,10 @@ jobs:
       # login
       - run: |
           docker login ghcr.io --username $USERNAME --password-stdin <<< "$PASSWORD"
-          docker login quay.io --username "$DOCKER_USERNAME" --password-stdin <<< "$DOCKER_TOKEN"
         if: github.event_name == 'push'
         env:
           USERNAME: ${{ github.actor }}
           PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-          DOCKER_USERNAME: ${{ secrets.RELEASE_QUAY_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.RELEASE_QUAY_TOKEN }}
 
       # build
       - uses: docker/setup-qemu-action@e81a89b1732b9c48d79cd809d8d81d79c4647a18 # v2.1.0
@@ -63,8 +60,7 @@ jobs:
           fi
           echo "Building image for platforms: $IMAGE_PLATFORMS"
           docker buildx build --platform $IMAGE_PLATFORMS --sbom=false --provenance=false --push="${{ github.event_name == 'push' }}" \
-            -t ghcr.io/juangb/argo-cd/argocd:${{ steps.image.outputs.tag }} \
-            -t quay.io/argoproj/argocd:latest .
+            -t ghcr.io/juangb/argo-cd/argocd:${{ steps.image.outputs.tag }} .
         working-directory: ./src/github.com/juangb/argo-cd
 
       # sign container images
