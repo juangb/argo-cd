@@ -60,7 +60,8 @@ jobs:
           fi
           echo "Building image for platforms: $IMAGE_PLATFORMS"
           docker buildx build --platform $IMAGE_PLATFORMS --sbom=false --provenance=false --push="${{ github.event_name == 'push' }}" \
-            -t ghcr.io/juangb/argo-cd/argocd:${{ steps.image.outputs.tag }} .
+            -t ghcr.io/juangb/argo-cd/argocd:${{ steps.image.outputs.tag }}
+            -t ghcr.io/juangb/argo-cd/argocd:latest .
         working-directory: ./src/github.com/juangb/argo-cd
 
       # sign container images
@@ -74,11 +75,11 @@ jobs:
 
       - name: Get digest of image
         run: |
-          echo "IMAGE_DIGEST=$(crane digest quay.io/argoproj/argocd:latest)" >> $GITHUB_ENV
+          echo "IMAGE_DIGEST=$(crane digest ghcr.io/juangb/argo-cd/argocd:latest)" >> $GITHUB_ENV
 
       - name: Sign Argo CD latest image
         run: |
-          cosign sign --key env://COSIGN_PRIVATE_KEY quay.io/argoproj/argocd@${{ env.IMAGE_DIGEST }}
+          cosign sign --key env://COSIGN_PRIVATE_KEY ghcr.io/juangb/argo-cd/argocd@${{ env.IMAGE_DIGEST }}
           # Displays the public key to share.
           cosign public-key --key env://COSIGN_PRIVATE_KEY
         env:
