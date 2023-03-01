@@ -60,7 +60,7 @@ jobs:
           fi
           echo "Building image for platforms: $IMAGE_PLATFORMS"
           docker buildx build --platform $IMAGE_PLATFORMS --sbom=false --provenance=false --push="${{ github.event_name == 'push' }}" \
-            -t ghcr.io/juangb/argo-cd/argocd:${{ steps.image.outputs.tag }}
+            -t ghcr.io/juangb/argo-cd/argocd:${{ steps.image.outputs.tag }} \
             -t ghcr.io/juangb/argo-cd/argocd:latest .
         working-directory: ./src/github.com/juangb/argo-cd
 
